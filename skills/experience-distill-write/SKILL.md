@@ -1,0 +1,178 @@
+---
+name: experience-distill-write
+description: >-
+  规则（rule）：收到 WORKLOG_WRITTEN 后提炼可复用经验；价值门槛过滤；分 business/library/process；先搜后补
+  该规则源自 Cursor 规则库，属于用户固定约定，匹配到相关场景时必须遵循。
+---
+
+
+# 可复用经验（提炼写入）
+
+本规则独立于工作日志与开发流程步骤。只消费 `WORKLOG_WRITTEN`（或用户点名某条 worklog），从日志提炼 **experience** 卡。
+
+根目录：`~/.kne_document/`。凡 path 字段均为相对该根的子路径。
+
+**写入**：先本地落盘，再按 `kne-document-remote-storage` 同步到服务端（维护 `sync-registry.json`）。检索仍以本地 `experience/` 为准。
+
+## 何时执行（门禁）
+
+**仅当**出现以下之一：
+
+1. 上下文中出现以 `WORKLOG_WRITTEN` 开头的信号块（含相对 `worklog_path`）
+2. 用户明确要求从某条 worklog（相对或可解析路径）提炼经验
+
+否则整份忽略。
+
+## 执行优先级
+
+- 一旦出现 `WORKLOG_WRITTEN`，本规则属于**开发收尾的下一步**，应在同一收尾流程中立刻处理，不要拖到用户再次提醒。
+- 若评估后没有值得沉淀的经验，也要明确输出 `skipped` 与原因；**不要**因为“这次可能没经验可写”就整步漏掉。
+- 不要把“已写 worklog”误当成记录闭环已完成；`experience-distill-write` 完成（含 `skipped`）后，才算需求结束后的记录收尾真正完成。
+
+## 三类经验与路径
+
+| `category` | 含义 | 相对子路径（稳定文件） |
+|------------|------|------------------------|
+| `business` | 项目业务经验 | `experience/business/{projectName}/{stableSlug}.json` |
+| `library` | 组件 / 库的用法与场景 | `experience/library/{artifactSlug}/{stableSlug}.json` |
+| `process` | 发版 / PR / 升版本 / CI 等交付流程 | `experience/process/{topicSlug}/{stableSlug}.json` |
+
+- `stableSlug`：由 title 净化（去 `/\:*?"<>|`，空白改 `-`，≤50 字）；同一方面固定同一文件
+- `artifactSlug`：主 artifact 名净化（如 `EntrySelector`、`@kne/react-fetch` → `kne-react-fetch`、`components-core:FormInfo` → `components-core-FormInfo`）
+- `topicSlug`：流程主题净化（如 `publish`、`pr`、`version-bump`、`ci`）
+- 分类（按内容，不按会话里出现过的包名）：
+  - 本仓业务逻辑 / 业务规则 → `business`
+  - 某组件/包 **怎么用、什么场景用、用法踩坑** → `library`
+  - 升依赖、升版本、开 PR、合并触发 CI 发 npm 等 **交付/发布流程** → `process`
+- **禁止**把「升级某依赖并发布」写成 `library`（哪怕依赖是某个组件）；`library` 不写发布步骤
+
+## 价值判断（写入前必做）
+
+经验卡的唯一目的：**让未来会话少踩坑、少重复摸索**。每个拟提炼方面先过门槛；**不达标则不建、不更**。
+
+### 四项价值信号
+
+| 信号 | 含义 |
+|------|------|
+| **可迁移** | 换会话 / 换相近需求仍用得上（非本次 PR 号、临时路径、一次性文案） |
+| **非显然** | 不是官方文档直抄、不是已有 alwaysApply 规则复述、不是通用常识 |
+| **可行动** | 能改下次行为：写得出清晰 problem→solution（最好有 symptoms / donts） |
+| **有判别力** | 能区分错法与对法，不是「本次做了什么」流水账 |
+
+### 硬门槛
+
+- **新建**：必须 **可迁移**，且至少再满足 **非显然** 或 **有判别力**；并能用一句话写出 problem→solution
+- **更新已有卡**：本 worklog 须有 **实质增量** 之一——新 `symptom` / 新 `dont` / 更准 `rootCause` / 新 `keyCode` / 纠正错误 `solution`。仅「又发生一次同样的事」→ **不更新**（也不为了 append `sourceWorklogs` 而改文件）
+- **整条 worklog** 各方面均不达标 → 0 条，用 `skipped` 说明即可
+
+### 默认 skip（低价值）
+
+- 会话 changelog、升版本流水、验收原话 / 打分 / 方案演进复述
+- 复述已有 rules（如 development-workflow 步骤本身）
+- 纯文档补全且无决策点（例：「补了 README」）
+- 仅适用于单一 ticket 的配置值 / 文案 / 临时代码路径
+- 与已有卡同方面且无实质增量
+
+### 对照
+
+| skip | 写 |
+|------|-----|
+| 「本次把 showLength 改成了 0」 | 「窄操作区 ButtonGroup 默认露出按钮会裁切 → `showLength={0}`」 |
+| 「补了 cursor-setting README」 | （通常 skip；除非提炼出易错同步步骤） |
+| 「按流程开了 PR」 | 「依赖升级发布应归 process 而非 library」 |
+
+## 提炼原则
+
+- 一条 worklog → **0–N** 条经验（可为 0）；**每条只阐述一个方面**
+- 不同 artifacts / 根因 / 互不依赖修复点 → 分卡；同一方面合并
+- **不**写入方案演进、打分、验收原话
+- 价值不够 → skip，宁缺毋滥
+
+## 每个方面的流程（先判价值，再搜后写）
+
+1. 从 worklog 拆方面；对每方面做 **价值判断**；不达标 → `skipped` + 一句原因，进入下一方面
+2. 判定 `category` 与 1–3 个检索词
+3. 在 `~/.kne_document/experience/` 下检索已有卡（阶梯同 `experience-similar-search`）：同 `category`；`business` 限同项目；`library` 优先同 `artifactSlug`；`process` 优先同 `topicSlug`；候选 ≤3
+4. **有合适命中（同一方面）**：再确认有实质增量 → 更新该文件（合并 `keywords`/`symptoms`/`donts`；必要时修订 `problem`/`solution`/`rootCause`；追加不重复 `keyCode`，合计建议 ≤5 段；`sourceWorklogs` append 本日志且同 path 去重；更新 `updatedAt`）。**本地 Write 完成后**按 `kne-document-remote-storage` 同步（MCP `upload_experience` 优先）。无实质增量 → `skipped`（无实质增量）
+5. **无命中且过新建门槛 → 新建**稳定路径文件；填 `writtenAt` 与 `updatedAt`；**本地 Write 完成后**对每条新建/更新的 registryKey 按 `kne-document-remote-storage` 同步（**MCP `upload_experience` 优先**）
+6. 回复每行：`created|updated|skipped` + 相对子路径或方面简述（skipped 须带原因）
+
+## JSON（schemaVersion: 1）
+
+```json
+{
+  "schemaVersion": 1,
+  "category": "library",
+  "writtenAt": "2026-08-14T12:10:00+08:00",
+  "updatedAt": "2026-08-14T15:00:00+08:00",
+  "title": "EntrySelector 操作区按钮裁切",
+  "problem": "列表项右侧操作区固定宽度时，ButtonGroup 默认至少露出一个按钮导致文案被裁切",
+  "solution": "给操作区 ButtonGroup 设 showLength={0}，只保留更多图标，操作进下拉",
+  "keywords": ["EntrySelector", "ButtonGroup", "showLength", "裁切", "overflow"],
+  "artifacts": [
+    {
+      "type": "component",
+      "name": "EntrySelector",
+      "package": null,
+      "token": null
+    }
+  ],
+  "project": {
+    "name": "entry-selector",
+    "githubUrl": "https://github.com/kne-union/entry-selector"
+  },
+  "sourceWorklogs": [
+    {
+      "path": "worklog/entry-selector/2026-08-14-11-02-29/列表操作区按钮裁切修复.json",
+      "title": "列表操作区按钮裁切修复",
+      "addedAt": "2026-08-14T12:10:00+08:00"
+    }
+  ],
+  "symptoms": ["操作按钮文案显示不全"],
+  "rootCause": "overflow-items 与固定窄槽位冲突",
+  "donts": ["窄操作区不要用默认 showLength"],
+  "keyCode": [
+    {
+      "path": "src/index.js",
+      "symbol": "EntrySelector",
+      "language": "javascript",
+      "why": "showLength=0 避免强制露出按钮",
+      "code": "<ButtonGroup showLength={0} ... />"
+    }
+  ]
+}
+```
+
+- `artifacts[].type`：`component` | `package` | `remote` | `module`
+- `sourceWorklogs[].path` / 信号路径：相对 `~/.kne_document/`，禁止绝对路径
+- `keyCode[].path`：业务仓内相对路径；每段 ≤20 行
+- `business` 时 `project.name` 必填且与路径中 projectName 一致
+- `library` 时 `project` 记最近贡献来源即可
+- `process` 时 `project` 记发生该流程的仓库；`artifacts` 可记被发布的包，不要把「被升级的依赖」当成 library 卡的归属
+
+`process` 卡示例（路径如 `experience/process/publish/依赖升级后走-PR-由-CI-发版.json`）：
+
+```json
+{
+  "schemaVersion": 1,
+  "category": "process",
+  "title": "依赖升级后走 PR，合并由 CI 发版",
+  "problem": "组件仓要同步依赖并发布，交付应止于 PR",
+  "solution": "package.json 升依赖并 patch 升本包 version，开 PR 到 master；合并后由 Publish workflow 发 npm",
+  "keywords": ["publish", "PR", "升版本", "升级依赖"]
+}
+```
+
+## 禁止
+
+- 无 `WORKLOG_WRITTEN` 且无用户点名 worklog 时写入
+- 价值不达标仍新建或更新
+- 无实质增量仅为 append `sourceWorklogs` 而改文件
+- 把整次会话揉进一张卡
+- 无关方面硬并进已有卡
+- 每次有日志就盲目新建（须先搜、须过价值门槛）
+- path 使用绝对路径
+- 把经验文件写进业务仓库
+- 把发版 / PR / 升版本 / 升级依赖并发布 写成 `library`
+- **未本地落盘仅 upload 到服务端**
+- **同步成功仍删除本地 experience 文件**

@@ -1,0 +1,129 @@
+---
+name: development-workflow
+description: >-
+  规则（rule）：仅 kne-union：开发交付流程；结束后发出 DEVELOPMENT_COMPLETE 供 worklog 规则消费
+  该规则源自 Cursor 规则库，属于用户固定约定，匹配到相关场景时必须遵循。
+---
+
+
+# 开发流程（仅 kne-union）
+
+> **⛔ 拦截器（每次改代码前必读）**
+> 准备调用 StrReplace / Write 修改业务文件？**停下，先自问：**
+> 1. 是否已执行 `git status` 并处理了未提交改动（stash）？→ **否则先走步骤 1**
+> 2. 是否已从主干创建功能分支并切换过去？→ **否则先走步骤 1-2**
+> 3. 任务再小（哪怕一行）也不例外。跳过流程 = 违规。
+
+## 适用范围
+
+**仅当**当前仓库属于 [kne-union](https://github.com/kne-union) 时生效。判定任一即可：
+
+- `git remote -v` 含 `github.com/kne-union/`（或 `git@github.com:kne-union/`）
+- 用户明确说明正在 kne-union 仓库内开发
+
+**非 kne-union 项目：完全忽略本规则**（不要强制 stash、建分支、验收门禁、升版本；也不发出开发结束信号）。业务仓走 `business-development-workflow`。
+
+本规则只管开发交付，并在结束时**发出信号**。不在本规则内写 worklog / experience。
+
+独立规则：
+
+- 相似经验检索：`experience-similar-search`（读取）
+- 工作日志：`worklog-write`（消费下方信号）
+- 经验提炼：`experience-distill-write`（消费 `WORKLOG_WRITTEN`）
+- `@kne` / remote 文档：`kne-document-search`
+
+
+只要需要修改代码，一律按下列流程执行。不需要「开始需求」等触发词。
+
+## 1. 检查工作区（有未提交则 stash）
+- 改代码前执行 `git status`（及必要的 `git diff`）
+- 记录 `ORIGINAL_BRANCH`（当前分支）与 `STASHED=false`
+- 若存在未提交改动（已暂存 / 未暂存 / 未跟踪且未被 ignore）：
+  1. `git stash push -u -m "cursor-workflow: auto-stash before <简短说明>"`
+  2. 设 `STASHED=true`，汇报已 stash，**不要**因此终止流程
+  3. stash 失败则停止并提示用户，不得丢改动、不得继续改代码
+- 工作区干净（或 stash 成功）后再进入下一步
+- **不要**用 `stash -a`（会带上 ignore，如 `node_modules`）
+- 本规则在**同一仓库目录**开发，不能「stash → 复制到另一目录 → 立刻 pop」：若建分支后立刻 pop，WIP 会随工作区进功能分支。因此 stash **保持到 PR 成功（或流程中止）再还原**
+## 2. 从主分支创建新分支
+- git fetch origin
+- 确定主分支（main / master，或仓库约定主干）
+- 从最新主干创建分支，命名：cursor/<简短英文描述>
+- 若平台要求分支后缀，按要求追加；重名则追加 -2、-3…
+## 3. 开发
+- 只改与需求相关的代码，保持最小改动
+- 能跑则跑相关测试/检查；失败则修复
+- 完成后汇报分支名与改动摘要，停下等待用户验收；若 `STASHED=true`，注明原 WIP 已 stash，提交完成后再还原
+- 未经明确要求，不得擅自在下游仓库安装、link 或启动服务做代验证
+## 4. 用户验收
+- 必须等用户明确表示通过/可以提交
+- 「差不多了」「先这样」「看看」等不算验收通过，须再确认
+## 5. 升版本 + 提交
+用户验收通过并授权提交后：
+
+### 5.0 提交前：本地调试泄漏门禁（必须先过）
+
+在 stage / commit **之前**检查本次将提交的 diff（含 `preset.js`、`package.json`、`package-lock.json` / `pnpm-lock.yaml` / `yarn.lock` 等）。命中任一项则**停止提交**，列出路径与原文，请用户确认：改回 CDN/npm 正式地址后再提交，或明确授权「带本地调试配置提交」（默认不授权）。
+
+| 检查项 | 典型命中 | 处理 |
+|---|---|---|
+| 远程组件仍指向本机 | `preset.js` / `remoteLoaderPreset` 里未注释的 `url: 'http://localhost:…'`、`127.0.0.1`、本机 IP；或 `tpl: '{{url}}'` 配本地 url | 注释掉本地 url/tpl，恢复 registry CDN（`https://cdn.leapin-ai.com` 等）与已发版 `defaultVersion` |
+| `file:` 本地依赖 | `package.json` / lockfile 中 `"xxx": "file:…"`、`link:…`（调试用本地路径） | 改回 registry 版本号；勿把未发布的本地 path 写进将合入的依赖 |
+| 本地拷包未发版 | 将未发版包的 `dist`/`build` rsync 或覆盖进 `node_modules/@…`；或依赖指向仅本地存在、CDN/npm 尚无对应 version 的包 | 等包发版且 CDN/npm 可访问后再升 `defaultVersion` / 依赖版本；**禁止**把「只在本机拷过源码、未发版」当成已交付 |
+
+建议快速扫（在仓库根，按项目调整路径）：
+
+```bash
+# 远程组件本机地址（忽略已注释行需人工看上下文）
+rg -n "localhost:|127\\.0\\.0\\.1|file:|link:" --glob '**/preset.js' --glob '**/package.json' --glob '**/*lock*' .
+```
+
+门禁通过后再继续：
+
+1. 升级相关包 package.json 的 version（未指定则 patch +1）；有功能/修复改动必须升版本
+2. 并行 git status、git diff、git log -1
+3. 只 stage 本次相关文件；不提交 .env、密钥等
+4. HEREDOC commit：feat/fix: 简述 + 空行 + 原因
+5. 不 amend 已 push 的 commit
+## 6. Push + PR（合到主分支）
+- git push -u origin HEAD
+- 创建 PR，base 为主分支；Summary 写明版本号变化
+- 不 merge、不 force push、不改 git config
+- 「PR」不等于「发版」；publish 仅在用户明确说「发布/发版」后执行
+## 7. 还原 stash
+- 若 `STASHED=true`：在 **PR 成功之后**，或流程中止（未发出 `DEVELOPMENT_COMPLETE`）时，立刻还原：
+  1. `git checkout {ORIGINAL_BRANCH}`（已在该分支则跳过）
+  2. `git stash pop`
+  3. 汇报：已在 `ORIGINAL_BRANCH` 还原先前未提交改动
+- pop 冲突：停止并说明，**不要** `stash drop`，留给用户处理
+- `STASHED=false`：跳过本步
+- 等待验收期间保持 stash，不要提前 pop（避免 WIP 混进功能分支）
+## 8. 判定并输出「开发是否结束」信号
+
+PR 创建成功（已拿到 PR URL）后，在回复中**单独输出**下列信号块（原文照抄结构，填真实值）。未到此步、PR 失败、或流程中止：**不要**输出该信号。
+
+```text
+DEVELOPMENT_COMPLETE
+project: <GitHub 仓库名，不含 owner>
+branch: <已 push 的功能分支>
+pr_url: <PR URL>
+pr_number: <数字>
+version_bump: <如 0.1.57 → 0.1.58；无则 none>
+acceptance: <用户验收原话摘要>
+```
+
+- 本规则到此结束；**不要**在本规则内写 `~/.kne_document/worklog` 或 `experience`
+- 工作日志由 `worklog-write` 在收到上述信号后执行；经验由 `experience-distill-write` 在 `WORKLOG_WRITTEN` 后执行
+- **强制收尾**：PR 创建成功并发出 `DEVELOPMENT_COMPLETE` 后，**当前需求即视为结束**；但 agent 仍必须把后续记录步骤自动跑完。也就是说，发出信号后必须继续完成 `worklog-write`（含 MCP/REST 远程同步）并输出 `WORKLOG_WRITTEN`，随后继续执行 `experience-distill-write`（含远程同步；可为 `skipped`）。这些属于需求结束后的自动收尾，**不要**因为用户马上追问别的问题就直接跳过。
+
+## 禁止
+- 在非 kne-union 仓库套用本流程
+- 有未提交改动时跳过 stash 直接改代码，或因有 WIP 就终止流程
+- stash 后流程结束或中止却不还原（除非 pop 冲突已说明）
+- pop 冲突后执行 `stash drop`
+- 用 `stash -a` 把 ignore 目录（如 `node_modules`）塞进 stash
+- 未验收就升版本/commit/push/PR
+- 未过「5.0 本地调试泄漏门禁」仍提交（本机 remote url、`file:`/`link:` 依赖、未发版本地拷包）
+- 功能/修复 PR 不带 version bump
+- PR 未成功却输出 `DEVELOPMENT_COMPLETE`
+- 输出信号的同时自行写 worklog / experience

@@ -1,0 +1,73 @@
+---
+name: kne-document-search
+description: >-
+  规则（rule）：查 @kne / remote 文档时优先 MCP search_document_index；本地 npm-tools 索引仅兜底
+  该规则源自 Cursor 规则库，属于用户固定约定，匹配到相关场景时必须遵循。
+---
+
+
+# KNE 文档搜索（MCP 优先）
+
+涉及 `@kne/*` 包 API/用法，或 `remote-loader` 远程组件（如 `components-core:FormInfo`）时，**禁止凭记忆编造 API**。
+
+原则：**先 MCP、后本地；一次主检索通常够用；先摘要后深读。** 禁止整份 README / `components.json` 塞进上下文。
+
+## 何时触发
+
+- 使用 / 查阅 `@kne/...` 依赖
+- 使用 / 查阅 `src/preset.js` 里 `remoteLoaderPreset` 的 remote 组件
+- 用户问某组件 props、示例、目录结构
+
+## 主路径：`user-developer-document` MCP
+
+Namespace：`user-developer-document`（先 `GetDynamicTools` 确认可用）。
+
+| 工具 | 用途 |
+|------|------|
+| `search_document_index` | **主检索**：组件 / npm / remote 文档；一次调用在预算内返回可照抄的示例与 API；合并经验与后台文档命中 |
+| `fetch_docs` | 仅当结果标 `truncated` 或列出「未包含」，且确实需要时深读；一次传多个 `ref` |
+| `search_document` | 只搜后台 document（draft/非公开）；组件与 npm 文档不要用它替代 `search_document_index` |
+
+### 流程（必须按序）
+
+1. **定 query**：组件名、包名、`token`（如 `components-core:FormInfo`）或中文场景词；已知包/remote 时传 `docId`（可选 `version`）。
+2. **调用一次** `search_document_index`（默认 `mode=answer`）。只想列目录用 `mode=locate`。
+3. **不要**习惯性换关键词再搜一遍；结果够用就直接作答。
+4. 需要深读时用 `fetch_docs`，`refs` 形如：
+   - `doc-index:{docId}@{version}#/{组件名}`
+   - `doc-index:{docId}@{version}#/{组件名}/api/{子节}`
+   - `doc-index:{docId}@{version}#/{组件名}/examples/{序号}`
+5. 回答注明 `token` / 版本；优先引用 API + 必要示例代码。无 ref 支撑的 API **一律不要臆造**。
+
+### 禁止（MCP 可用时）
+
+- 跳过 MCP、先去 `~/.kne_document_indexed` 或猜 README 路径
+- 为拿示例手写切分 / 自造索引
+- MCP 已返回正文仍整份 Read 本地 `components.json` / README
+
+## 兜底：本地 npm-tools / 索引
+
+**仅当**下列之一成立时才走本地：
+
+1. `user-developer-document` 不可用（未配置 / 鉴权失败 / 工具报错）
+2. MCP 明确无命中，且本地索引已有对应 `<id>/<version>` 可核对
+3. 用户明确要求只用本地索引
+
+索引根：`KNE_DOCUMENT_INDEXED_DIR`，默认 `~/.kne_document_indexed`。
+
+### 兜底步骤
+
+1. 已有非空 `index.json` + `components.json` → 不重复拉取；否则用 `@kne/npm-tools`：
+   - remote：`getRemoteModuleDocument` → `buildDocumentIndex`
+   - npm：`getNpmPackageDocument` → `buildDocumentIndex`
+2. 检索阶梯：定 `<id>/<version>` → 只读 `index.json` 定位（候选 ≤3）→ `jq` 抽**单个**组件的 `summary`/`api`（示例默认 ≤2）→ 未命中再同目录 `rg` 匹配行。
+3. **禁止**整份 README / 整份 `components.json` / 无范围扫整个索引根进对话。
+4. **禁止**手写 `extractDocMd` / 自造索引格式（除非 npm-tools 也不可用且用户允许临时兜底）。
+
+## 意图对照
+
+| 意图 | MCP | 本地兜底 |
+|------|-----|----------|
+| API / 用法 / 示例 | `search_document_index`（必要时 `fetch_docs`） | jq 单组件 `api` / `examples` |
+| 只看有什么 | `mode=locate` | 只读 `index.json` |
+| 后台草稿文档 | `search_document` | — |

@@ -1,0 +1,67 @@
+---
+name: experience-similar-search
+description: >-
+  规则（rule）：动手前在 ~/.kne_document/experience/business|library|process 分层检索可复用经验，并经 MCP 检索「Prompts」类型 npm 包内的提示词，省 token
+  该规则源自 Cursor 规则库，属于用户固定约定，匹配到相关场景时必须遵循。
+---
+
+
+# 可复用经验检索（读取）
+
+本规则独立于工作日志写入与经验提炼。只负责动手前**读取** `~/.kne_document/experience` 下的经验卡（`business` / `library` / `process`），以及经 MCP 检索「Prompts」类型 npm 包内的提示词。不扫 `worklog/`。
+
+开始改代码、排错，或用户问「怎么做」且可能有历史经验时先查。无目录 / 无命中 → 一句话带过，直接继续。写入/补充见 `experience-distill-write`；服务端同步见 `kne-document-remote-storage`（**检索仍以本地为准**）。
+
+## 路径
+
+根目录：`~/.kne_document/`
+
+```text
+experience/business/{projectName}/{stableSlug}.json
+experience/library/{artifactSlug}/{stableSlug}.json
+experience/process/{topicSlug}/{stableSlug}.json
+```
+
+## 原则
+
+**先窄后宽、先路径后内容、先摘要后全文。** 禁止把整库 JSON 塞进上下文。
+
+## 检索阶梯（必须按序）
+
+1. **抽词**：从当前需求抽 **1–3** 个实词（组件名 / 包名 / 动作），勿用长句当 query。
+2. **定类别范围**：
+   - 偏组件/包用法或场景 → 先搜 `experience/library/`（可再限 `artifactSlug` 子目录）
+   - 偏本仓业务逻辑 → 先搜 `experience/business/<projectName>/`
+   - 偏发版 / PR / 升版本 / CI 发布 → 先搜 `experience/process/`（可再限 `topicSlug`，如 `publish`）
+   - 不确定 → 按意图最多搜两类，合计候选仍 ≤3
+3. **文件名零解析**：用 `find … -iname '*关键词*'` / `ls` 粗筛，**不读文件内容**。
+4. **浅内容**：对候选 `rg -n -i '关键词' --glob '*.json'`，**只看匹配行**；优先 `"title"` / `"problem"` / `"solution"` / `"keywords"`。
+5. **摘要投影**（每条最多一次 `jq`）：只取
+   - `title`, `category`, `problem`, `solution`, `keywords`, `artifacts`, `rootCause`, `updatedAt`
+   - **默认不取** `keyCode`、`sourceWorklogs`、长 `donts`
+6. **深读限额**：决定复用时，**仅对 1 条**再取 `keyCode`（及必要时 `sourceWorklogs`）。
+7. **硬上限**：候选 ≤ **3**。
+
+## 提示词检索（Prompts 包）
+
+服务端会把开发者文档里 `type=prompts` 的 npm 包（如 `@kne/prompts-frontend-libs`）中的 `prompts/**/*.md` 入库，并随包发版自动更新为新版本内容。
+
+1. MCP `user-developer-document` 可用时，用上面抽出的同一组关键词调用**一次** `search_experience`，传 `category: "prompts"`（经验仍以本地为准）。MCP 不可用 → 一句话带过，跳过本节。
+2. 只看返回的 `prompts[]`：`title` / `packageName` / `version` / `fileName` / `snippet`；候选 ≤ **3**。
+3. 决定采用时，**仅对 1 条**调用 `get_prompt(packageName, fileName)` 取全文。
+4. 版本：`version` 即服务端最新同步版本。当前项目已 `deployPrompts` 且 `prompts/prompts.json` 记录的同包版本更旧时，以 MCP 全文为准，并提示用户执行 `npx @kne/npm-tools deployPrompts <type>` 刷新本地。
+
+## 对用户输出
+
+最多 1–3 条：`title` + `category` + 一句话（`problem`→`solution`）+ 相对子路径。命中且沿用时先复述摘要再动手。
+
+提示词命中另列最多 2 条：`title` + `packageName@version` / `fileName` + 一句话说明用途。
+
+## 禁止
+
+- 检索 `worklog/` 当作经验
+- `find ~/.kne_document/experience | xargs cat`（或等价整库读取）
+- 一次性 Read / 粘贴多个完整 JSON
+- 无命中后反复扩大检索空转
+- 发版 / 升版本 / 开 PR / 升级依赖并发布 不要搜 `library/`（应搜 `process/`）
+- 跳过 `search_experience`，直接用 `get_prompt` 列出全部包再逐个读全文；或一次批量取多份提示词全文

@@ -1,0 +1,295 @@
+---
+name: business-development-workflow
+description: >-
+  规则（rule）：非 kne-union 业务项目：先拷贝到 ~/.cursor_workplace 开发，验收提交后拷回原仓同名分支并 merge 到个人基线分支，输出 DEVELOPMENT_COMPLETE
+  该规则源自 Cursor 规则库，属于用户固定约定，匹配到相关场景时必须遵循。
+---
+
+
+# 开发流程（业务项目）
+
+> **⛔ 拦截器（每次改代码前必读）**
+> 准备调用 StrReplace / Write 修改业务文件？**停下，先自问：**
+> 1. 本次改动的**文件路径**是否在 `WORKPLACE_ROOT` 下？→ **否则禁止改文件**
+> 2. 是否已完成"拷贝到 workplace → 建分支"？→ **否则先走步骤 1-3**
+> 3. 任务再小（哪怕一行）也不例外。直接改 SOURCE = 违规。
+
+## 适用范围
+
+**仅当**当前仓库**不属于** [kne-union](https://github.com/kne-union) 时生效。判定 kne-union 任一即可（命中则**忽略本规则**，走 `development-workflow`）：
+
+- `git remote -v` 含 `github.com/kne-union/`（或 `git@github.com:kne-union/`）
+- 用户明确说明正在 kne-union 仓库内开发
+
+**kne-union 项目：完全忽略本规则**（不要强制 workplace 拷贝、stash、建分支、验收门禁、升版本；也不发出开发结束信号）。
+
+与 kne-union 的 `development-workflow` 互斥：本规则不替代 kne-union 流程。
+
+本规则只管开发交付，并在结束时**发出信号**。不在本规则内写 worklog / experience。
+
+独立规则：
+
+- 相似经验检索：`experience-similar-search`（读取）
+- 工作日志：`worklog-write`（消费下方信号）
+- 经验提炼：`experience-distill-write`（消费 `WORKLOG_WRITTEN`）
+
+
+只要需要修改代码，一律按下列流程执行。不需要「开始需求」等触发词。
+
+**核心约定：** 业务代码只在 `~/.cursor_workplace/{项目名}/{时间戳}/` 副本中修改；原仓（SOURCE）仅在提交阶段接收同名分支并合回个人基线分支；**merge 并清理 workplace 后须回到 SOURCE_ROOT 继续**（见下方「禁止 fetch」——回到原仓正常，**不要**为此调用会 fetch 的工具）。
+
+### 禁止 fetch（切回 SOURCE 正常，勿用 move_agent_to_root）
+
+- **禁止**调用 `move_agent_to_root`、`move_agent_to_cloned_root`（**内置会 `git fetch origin`**）
+- **禁止**执行 `git fetch` / `git pull`（除非用户明确要求）
+- **merge 清理 workplace 后须回到 SOURCE_ROOT 继续**（正常收尾）；用 `SOURCE_ROOT` 绝对路径操作即可，**不要**为切回而调用上述 MCP 工具
+- 开发阶段在 **WORKPLACE_ROOT**、拷回/merge/收尾在 **SOURCE_ROOT**；Shell 用 `cd` / `git -C`，文件读写用绝对路径
+
+会话中记住：
+
+- `SOURCE_ROOT`：用户打开的原项目绝对路径
+- `WORKPLACE_ROOT`：本次副本绝对路径 `~/.cursor_workplace/<项目名>/<时间戳>/`
+- `PERSONAL_BRANCH`：个人基线分支名，由当前 git `user.name` 得到（见下方「个人基线分支」）
+- `ORIGINAL_BRANCH`：开始时 SOURCE 所在分支
+
+### 复制包装（stash → 复制 → 立刻还原）
+
+SOURCE 与 WORKPLACE 是**两个目录**。原仓若有未提交改动，只在「复制」前后短暂 stash，**复制一结束就还原**，不要把 stash 留到验收结束。
+
+适用两次：
+
+1. **开工拷出**：stash → rsync 到 workplace → 立刻在 SOURCE `stash pop`
+2. **提交拷回**：stash → 在 SOURCE 建同名分支 / `am` / merge → 立刻在 SOURCE `stash pop`
+
+每次包装步骤（均在 **SOURCE_ROOT**）：
+
+1. `git status`；记下当前分支 `WRAP_BRANCH`（开工时即 `ORIGINAL_BRANCH`）
+2. 若有未提交（已暂存 / 未暂存 / 未跟踪且未被 ignore）：
+   - `git stash push -u -m "cursor-workflow: wrap-copy <拷出|拷回>"`
+   - 失败则停止，不得丢改动、不得继续复制
+3. 执行本次复制 / git 写入（rsync、checkout、`am`、merge）
+4. 若本次做了 stash：先 `git checkout {WRAP_BRANCH}`（已在则跳过），再 `git stash pop`
+5. pop 冲突：停止并说明，**不要** `stash drop`
+6. **不要**用 `stash -a`；**不要**在 WORKPLACE 里 pop SOURCE 的 stash
+7. 拷回还原后停在 `WRAP_BRANCH`（用户的 WIP 回到原处）；merge 结果在 `{PERSONAL_BRANCH}`，汇报时写明
+
+干净工作区：跳过 stash / pop，只做复制。
+
+### 个人基线分支
+
+在 **SOURCE_ROOT**（或副本，二者 `user.name` 应一致）执行 `git config user.name`：
+
+1. 去掉首尾空白
+2. 空白与非法字符 `/\:*?"<>|` 替换为 `-`
+3. **转小写**（例：`Linzp` → `linzp`）
+4. 结果即为 `PERSONAL_BRANCH`；下文凡写 `{PERSONAL_BRANCH}` 均指该值，**不要**写死 `linzp`
+5. 若 `user.name` 为空：停止并提示用户配置，不要臆造分支名
+
+
+## 1. 检查原仓工作区
+
+在 **SOURCE_ROOT** 执行：
+
+- `git status`（及必要的 `git diff`）
+- 记录 `ORIGINAL_BRANCH`（当前分支）、`SOURCE_ROOT`、仓库名（`basename`，作 `{项目名}`）、`PERSONAL_BRANCH`
+- **不要**因有未提交改动而终止；有 WIP 时按「复制包装」在下一步拷出时处理
+
+## 2. 拷贝到 ~/.cursor_workplace
+
+按「复制包装」：**有 WIP 则先 stash，再复制，复制完立刻在 SOURCE 还原**。
+
+1. 时间戳：`YYYYMMDD-HHMMSS`（本地时区）
+2. 目标：`WORKPLACE_ROOT=$HOME/.cursor_workplace/<项目名>/<时间戳>/`
+3. 若 SOURCE 有未提交：`git stash push -u`（规则见「复制包装」）
+4. `mkdir -p` 后完整拷贝（**必须含 `.git`**），**不要复制 `node_modules`**，拷完后用 symlink 指向原仓：
+
+```bash
+mkdir -p "$WORKPLACE_ROOT"
+rsync -a \
+  --exclude node_modules \
+  --exclude .next \
+  --exclude dist \
+  --exclude build \
+  --exclude coverage \
+  --exclude .turbo \
+  "$SOURCE_ROOT/" "$WORKPLACE_ROOT/"
+
+# 只软链「项目级」node_modules（根目录、server/ 等），不要链嵌套在 node_modules 里面的
+find "$SOURCE_ROOT" \( -type d -o -type l \) -name node_modules -not -path '*/node_modules/*' | while read -r src_nm; do
+  rel="${src_nm#$SOURCE_ROOT/}"
+  dest="$WORKPLACE_ROOT/$rel"
+  mkdir -p "$(dirname "$dest")"
+  # 目标若已是目录，ln -sfn 会在其内再套一层，污染 SOURCE（ENOTDIR）
+  if [ -e "$dest" ] || [ -L "$dest" ]; then
+    rm -rf "$dest"
+  fi
+  ln -sfn "$src_nm" "$dest"
+done
+```
+
+- **必须**用上述 `find … -not -path '*/node_modules/*'` 遍历项目级 `node_modules` 再 `ln -sfn`；不要只链根目录（会漏 `server/node_modules`，`nodemon` 找不到）
+- **只链这一层**：禁止对 `node_modules` 内部的嵌套 `node_modules` 做软链
+- **软链前若目标已存在，先 `rm -rf` 再 `ln -sfn`**：禁止对已存在的真实目录直接 `ln -sfn`（会变成 `dest/node_modules`，写回 SOURCE，npm 报 ENOTDIR）
+- **禁止**在副本里对已 symlink 的 `node_modules` 再执行 `npm/yarn/pnpm install`（会写回原仓依赖树）；仅当 SOURCE 本身没有 `node_modules`、且用户明确要求在副本安装时，才可在副本新建真实目录安装
+- 拷回原仓（第 7 步）时**不要**同步或覆盖 `node_modules`（跳过 symlink / 该路径）
+- 若 rsync 失败且本次已 stash：先在 SOURCE `stash pop` 再停止
+
+5. 拷贝结束后：若本次 stash 了，立刻在 SOURCE 的 `ORIGINAL_BRANCH` 上 `stash pop`（原仓 WIP 复原；副本保持刚才拷到的干净提交态）
+6. 汇报：`SOURCE_ROOT`、`WORKPLACE_ROOT`、`PERSONAL_BRANCH`、拷出时是否 stash/已还原、`node_modules` 是否已 symlink；**后续所有开发命令与文件读写一律指向 `WORKPLACE_ROOT` 绝对路径**（禁止 `move_agent_to_root`）
+
+## 3. 在副本中从个人基线创建新分支
+
+在 **WORKPLACE_ROOT**：
+
+- **不要** `git fetch origin`（建分支只用本地已有引用，不拉远程）
+- 确保存在 `{PERSONAL_BRANCH}`：
+  - 本地已有：以其为基线
+  - 本地没有、但已有 `origin/{PERSONAL_BRANCH}` 引用：`git checkout -b {PERSONAL_BRANCH} origin/{PERSONAL_BRANCH}`
+  - 本地与 `origin/{PERSONAL_BRANCH}` 都没有：从默认主干创建本地 `{PERSONAL_BRANCH}`
+- 从 **`{PERSONAL_BRANCH}`** 创建功能分支，命名：`cursor/<简短英文描述>`
+- 若平台要求分支后缀，按要求追加；重名则追加 -2、-3…
+- **不要**从默认主干直接拉功能分支（除非正在创建缺失的 `{PERSONAL_BRANCH}` 本身）
+
+## 4. 开发（仅 WORKPLACE_ROOT）
+
+- 只改与需求相关的代码，保持最小改动
+- **禁止**在 `SOURCE_ROOT` 直接改业务代码（本阶段）
+- 能跑则跑相关测试/检查；失败则修复
+- 完成后停下等待用户验收，汇报必须包含：
+  1. 功能分支名、`WORKPLACE_ROOT`、`PERSONAL_BRANCH`、改动摘要
+  2. **可直接复制执行的验证/启动命令**（用户要自己跑起来验收时必给；不得只写「请本地验证」这类空话）
+- 启动命令要求：
+  - **必须**写成单行 `cd "$WORKPLACE_ROOT" && <命令>`（或等价绝对路径一行）；禁止只写 `npm start` 而不带 `cd`
+  - 若必须在 SOURCE / 下游仓验证，写清对应路径与原因
+  - 按实际栈给出完整命令（如 `npm start` / `npm run dev` / `pnpm dev` / `yarn start`，或 README / `package.json` scripts 中的真实 script 名）
+  - 需要环境变量、端口、打开的 URL、示例请求时一并写出
+  - 若本次改动无需启动服务（纯库/纯配置）：给出等价验证命令（单测、`npm test`、构建命令等），并注明「无需起服务」
+  - 从仓库 `package.json` / README / 既有脚本推断；不确定时先读再写，禁止臆造不存在的 script
+- 未经明确要求，不得擅自在下游仓库安装、link 或启动服务做代验证
+
+## 5. 用户验收
+
+- 必须等用户明确表示通过/可以提交
+- 「差不多了」「先这样」「看看」等不算验收通过，须再确认
+- **触发词约定**：用户只说「提交」「可以提交」「验收通过并提交」等，即同时授权 **第 6–9 步**（副本提交 → 拷回原仓同名分支 → merge 回 `{PERSONAL_BRANCH}` → 清理 workplace），**不要**停在中途等用户再说「合回个人分支」
+- 若用户反馈「起不来 / 命令不对」：先修正启动说明或修复代码，再重新进入等待验收；不得在未给出可运行命令的情况下催促验收
+
+## 6. 副本内升版本 + 提交
+
+用户验收通过并授权提交后（含仅说「提交」），在 **WORKPLACE_ROOT** 的功能分支上：
+
+### 6.0 提交前：本地调试泄漏门禁（必须先过）
+
+在 stage / commit **之前**检查本次将提交的 diff（含 `preset.js`、`package.json`、`package-lock.json` / `pnpm-lock.yaml` / `yarn.lock` 等）。命中任一项则**停止提交**，列出路径与原文，请用户确认：改回 CDN/npm 正式地址后再提交，或明确授权「带本地调试配置提交」（默认不授权）。
+
+| 检查项 | 典型命中 | 处理 |
+|---|---|---|
+| 远程组件仍指向本机 | `preset.js` / `remoteLoaderPreset` 里未注释的 `url: 'http://localhost:…'`、`127.0.0.1`、本机 IP；或 `tpl: '{{url}}'` 配本地 url | 注释掉本地 url/tpl，恢复 registry CDN（`https://cdn.leapin-ai.com` 等）与已发版 `defaultVersion` |
+| `file:` 本地依赖 | `package.json` / lockfile 中 `"xxx": "file:…"`、`link:…`（调试用本地路径） | 改回 registry 版本号；勿把未发布的本地 path 写进将合入的依赖 |
+| 本地拷包未发版 | 将未发版包的 `dist`/`build` rsync 或覆盖进 `node_modules/@…`；或依赖 / `defaultVersion` 指向仅本地存在、CDN/npm 尚无对应 version 的包 | 等包发版且 CDN/npm 可访问后再升版本；**禁止**把「只在本机拷过源码、未发版」当成已交付 |
+
+建议快速扫（在 **WORKPLACE_ROOT**）：
+
+```bash
+rg -n "localhost:|127\\.0\\.0\\.1|file:|link:" --glob '**/preset.js' --glob '**/package.json' --glob '**/*lock*' .
+```
+
+门禁通过后再继续：
+
+1. 升级相关包 `package.json` 的 version（未指定则 patch +1）；有功能/修复改动必须升版本
+2. 并行 `git status`、`git diff`、`git log -1`
+3. 只 stage 本次相关文件；不提交 `.env`、密钥等
+4. HEREDOC commit：`feat`/`fix`: 简述 + 空行 + 原因
+5. 不 amend 已 push 的 commit
+6. **提交成功后立刻进入第 7 步**，不得以「先提交、稍后合回」结束回合
+
+## 7. 拷回原仓：同名分支 + 应用改动
+
+在 **SOURCE_ROOT**（Shell 用 `git -C "$SOURCE_ROOT"` 或 `cd "$SOURCE_ROOT"`；**禁止** `move_agent_to_root`）。
+
+按「复制包装」：**有 WIP 则先 stash，再拷回（建分支 / `am` / merge），完成立刻还原**。不要因 SOURCE 不干净而终止。
+
+1. 记下 `WRAP_BRANCH`（此时 SOURCE 当前分支，通常即 `ORIGINAL_BRANCH`）
+2. 若 SOURCE 有未提交：`git stash push -u`（失败则停，不要覆盖、不要 drop 已有 stash）
+3. **不要** `git fetch origin`（拷回与 merge 只用本地 `{PERSONAL_BRANCH}`，不拉远程）
+4. 确保本地 `{PERSONAL_BRANCH}` 存在（优先本地已有；不要为合回去 fetch。仅当本地没有、但已有 `origin/{PERSONAL_BRANCH}` 引用时，才按第 3 步从该引用建本地分支）
+5. 从 `{PERSONAL_BRANCH}` 创建与副本**同名**的功能分支：`git checkout -b <与 WORKPLACE 相同的分支名> {PERSONAL_BRANCH}`
+   - 若同名分支已存在：先确认是否可复用；冲突则停止并询问用户，不要擅自 `-f` 删除
+6. 将副本相对 `{PERSONAL_BRANCH}` 的提交应用到原仓同名分支，优先顺序：
+   1. `git -C "$WORKPLACE_ROOT" format-patch {PERSONAL_BRANCH} --stdout | git -C "$SOURCE_ROOT" am --3way`
+   2. 若 `am` 失败：用 `git -C "$WORKPLACE_ROOT" diff {PERSONAL_BRANCH}...HEAD` 生成 patch，在 SOURCE 同名分支上 `git apply` / 手动落文件后，用**与副本相同的 commit message** 再 commit 一次
+7. 核对 SOURCE 同名分支与 WORKPLACE 的关键 diff 一致（至少 `git diff {PERSONAL_BRANCH}...HEAD --stat` 对齐）
+8. **不要**默认 push 功能分支
+9. 若 `am` / merge 失败且本次已 stash：先 `git checkout {WRAP_BRANCH}` 再 `stash pop`，然后停止并说明（不要留下悬挂 stash）
+
+## 8. Merge 回原仓本地个人基线
+
+仍在 **SOURCE_ROOT**（此时工作区应仍是第 7 步 stash 后的干净态，**尚未 pop**）：
+
+1. `git checkout {PERSONAL_BRANCH}`
+2. 将同名功能分支 merge 进本地 `{PERSONAL_BRANCH}`（常规 merge；不 fetch、不 force push、不改 git config）
+3. 「合到个人基线」不等于「发版 / 推远程」；push 或发版仅在用户明确说后执行
+4. 若用户明确说「只提交不合回 / 先别 merge」：可跳过 merge，但仍须做下面的还原
+5. **立刻还原**：`git checkout {WRAP_BRANCH}`，若第 7 步做了 stash 则 `git stash pop`；pop 冲突则停止、不要 drop
+6. 汇报：已合并的功能分支名、合入 `{PERSONAL_BRANCH}`、WIP 已还原到 `WRAP_BRANCH`、`WORKPLACE_ROOT`、简要变更
+7. merge 成功后进入第 9 步清理 workplace
+
+## 9. 清理 workplace（merge 成功后）
+
+merge 进 `{PERSONAL_BRANCH}` 且 WIP 已还原后**必须**清理本次副本（不要把 workplace 留到下次会话）：
+
+1. 若副本内仍有 dev server 在跑：先说明端口/PID，**不要**自行 kill；等用户停掉后再删，或用户明确要求清端口后再 `rm -rf`
+2. `rm -rf "$WORKPLACE_ROOT"` 删除本次副本目录（仅删本次时间戳目录，不删 `~/.cursor_workplace/<项目名>/` 父目录或其它会话副本）
+3. **收尾后在 SOURCE_ROOT 继续**（后续读写、`git -C` 均指向 SOURCE_ROOT；**禁止** `move_agent_to_root` / `move_agent_to_cloned_root`）
+4. 汇报已清理的 `WORKPLACE_ROOT` 与 `SOURCE_ROOT`
+
+merge 失败、用户中止、或仅 commit 未合回：**不要**清理 workplace。
+
+## 10. 判定并输出「开发是否结束」信号
+
+原仓本地 `{PERSONAL_BRANCH}` merge **成功**后，在回复中**单独输出**下列信号块（原文照抄结构，填真实值）。未到此步、merge 失败、或流程中止：**不要**输出该信号。
+
+```text
+DEVELOPMENT_COMPLETE
+project: <GitHub 仓库名，不含 owner>
+branch: <已合并的功能分支>
+merged_into: <PERSONAL_BRANCH，如 linzp>
+pr_url: none
+pr_number: none
+version_bump: <如 0.1.57 → 0.1.58；无则 none>
+acceptance: <用户验收原话摘要>
+workplace: <WORKPLACE_ROOT>
+```
+
+- 本规则到此结束；**不要**在本规则内写 `~/.kne_document/worklog` 或 `experience`
+- 工作日志由 `worklog-write` 在收到上述信号后执行；经验由 `experience-distill-write` 在 `WORKLOG_WRITTEN` 后执行
+- **强制收尾**：原仓本地 merge 成功后，**当前需求即视为结束**；但 agent 仍必须把后续记录步骤自动跑完。也就是说，发出 `DEVELOPMENT_COMPLETE` 后，必须继续让 `worklog-write` 落盘、**MCP/REST 同步 remote** 并输出 `WORKLOG_WRITTEN`，随后继续让 `experience-distill-write` 处理完成（含远程同步；可为 `skipped`）。这两个后续步骤属于需求结束后的自动收尾，**不要**因为用户紧接着问了新问题就跳过记录。
+
+## 禁止
+
+- 在 kne-union 仓库套用本流程（应走 `development-workflow`）
+- 原仓有未提交改动时跳过 stash 直接拷贝或拷回，或因有 WIP 就终止流程
+- 拷出或拷回完成后不立刻在 SOURCE 还原 stash（除非 pop 冲突已说明）
+- 把 stash 留到验收结束（开工拷出后原仓应已复原，用户可继续用原仓 WIP）
+- pop 冲突后执行 `stash drop`
+- 用 `stash -a` 把 ignore 目录（如 `node_modules`）塞进 stash
+- 跳过 workplace 拷贝，直接在 SOURCE 改业务代码
+- 复制 `node_modules` 实体目录，或对已 symlink 的 `node_modules` 在副本内执行 install
+- 对嵌套在 `node_modules` 内的路径做 `ln -sfn`，或对已存在的真实目录直接 `ln -sfn`（会在 SOURCE 造出 `pkg/node_modules/node_modules`）
+- 拷回原仓时同步/覆盖 `node_modules`
+- 未验收就升版本/commit/merge/拷回
+- 未过「6.0 本地调试泄漏门禁」仍提交（本机 remote url、`file:`/`link:` 依赖、未发版本地拷包）
+- 等待验收时不给出具体启动/验证命令（或未写成 `cd "$WORKPLACE_ROOT" && …` 单行 / 臆造 script）
+- merge 成功后不清理 `$WORKPLACE_ROOT`、或不回到 **SOURCE_ROOT** 继续
+- 调用 `move_agent_to_root` / `move_agent_to_cloned_root`（会触发 fetch；**不等于**禁止 merge 后回到 SOURCE）
+- 只 symlink 根目录 `node_modules` 而漏掉 `server/node_modules` 等子包目录
+- 功能/修复改动不带 version bump（有 package.json 时）
+- 写死 `linzp`（或其它人名）作为基线分支，而不用当前 `git config user.name` 净化小写结果
+- 本地已有 `{PERSONAL_BRANCH}` 却从默认主干直接拉功能分支
+- 用户已说「提交」却只在副本 commit、不拷回原仓或不合回 `{PERSONAL_BRANCH}`（除非用户明确要求跳过）
+- merge 未成功却输出 `DEVELOPMENT_COMPLETE`
+- 输出信号的同时自行写 worklog / experience
+- 流程中执行 `git fetch origin`（建分支与合回只用本地 `{PERSONAL_BRANCH}` 及已有引用）
+- 未经用户要求 push 远程或开 PR
+- 套用 kne-union 的 `development-workflow`（push/PR 到主干）替代本流程
+- 用副本目录覆盖 SOURCE 的 `.git`，或在 SOURCE 执行破坏性 git 命令清理历史

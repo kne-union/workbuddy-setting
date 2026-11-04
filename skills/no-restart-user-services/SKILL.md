@@ -1,0 +1,13 @@
+---
+name: no-restart-user-services
+description: >-
+  规则（rule）：禁止擅自重启用户本地开发服务；需要重启时只告知用户自行操作
+  该规则源自 Cursor 规则库，属于用户固定约定，匹配到相关场景时必须遵循。
+---
+
+
+# 本地服务重启权限
+
+- **禁止**自行启动、停止、重启用户的本地开发服务（如 `npm start`、`craco start`、dev server、kill 占用端口进程等）。
+- 若改动需要重启才生效（例如同步了 `node_modules` dist、清了 webpack cache、改了 craco/webpack 配置），**只说明原因和需要重启的服务/命令**，由用户自己操作。
+- 可以：改代码、重建 dist、`rsync` 到 `node_modules`、检查端口/日志；不可以：对正在跑的服务执行 kill / restart / 重新 `npm start`。

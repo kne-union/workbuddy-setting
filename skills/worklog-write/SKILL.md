@@ -1,0 +1,145 @@
+---
+name: worklog-write
+description: >-
+  规则（rule）：仅在收到 DEVELOPMENT_COMPLETE（或用户明确要求）时写入工作日志 JSON，并输出 WORKLOG_WRITTEN
+  该规则源自 Cursor 规则库，属于用户固定约定，匹配到相关场景时必须遵循。
+---
+
+
+# 工作日志（写入）
+
+本规则独立于开发流程步骤与可复用经验。只消费上级信号并落盘 **worklog**，不自行判断「开发是否结束」，也不写 experience。
+
+## 何时执行（门禁）
+
+**仅当**出现以下之一时执行写入；否则整份规则忽略：
+
+1. 同一次回复上下文中已出现开发流程发出的信号块，且以 `DEVELOPMENT_COMPLETE` 开头
+2. 用户明确要求「写工作日志 / 落盘 worklog」
+
+未收到信号 → **不执行**。
+
+## 执行优先级
+
+- 一旦命中门禁，`worklog-write` 属于**需求结束后的强制收尾步骤**：应在当前开发闭环中**立即执行**，不要等用户下次提醒。
+- 即使用户在 `DEVELOPMENT_COMPLETE` 后立刻追问别的问题，也应先补完本规则，再切换话题。
+- 若上一条回复已经发出 `DEVELOPMENT_COMPLETE`，但当前上下文里还没有 `WORKLOG_WRITTEN`，应优先视为漏执行并立刻补写，而不是假设它会自动发生。
+
+## 路径
+
+根目录：`~/.kne_document/`
+
+```text
+相对子路径：worklog/{projectName}/{YYYY-MM-DD-HH-mm-ss}/{title}.json
+绝对落盘：~/.kne_document/ + 相对子路径
+```
+
+- `projectName`：优先用信号里的 `project`；否则用 GitHub 仓库名（不含 owner）
+- 时间戳：写文件时本地时间，精确到秒
+- `{title}`：与 JSON 内 `title` 对齐；去掉 `/\:*?"<>|`，空白改 `-`，建议 ≤50 字
+- **JSON / 信号里的 path 只记相对子路径**，禁止绝对路径
+- 目录不存在则创建；**不要**把该文件写进业务仓库
+
+## 本地落盘 + 远程同步
+
+1. **必须先**按上节路径 **Write 本地 JSON**
+2. **立即**按 `kne-document-remote-storage` 同步到 remote（**MCP `upload_worklog` 优先**；MCP 不可用时 REST 脚本兜底）
+3. 同步成功更新 `~/.kne_document/sync-registry.json`；失败则保留本地并**一行**说明，**仍输出** `WORKLOG_WRITTEN`
+4. **禁止**因同步而跳过本地落盘或删除本地文件
+
+## 信号 → 字段映射
+
+| 信号字段 | 写入位置 |
+|----------|----------|
+| `pr_url` / `pr_number` / `branch` | `pr.url` / `pr.number` / `pr.branch`（`none` 则可省略 `pr`） |
+| `version_bump` | `finalSolution.versionBump` |
+| `acceptance` | `requirement.acceptanceNotes` |
+| `project` | `project.name` |
+
+其余字段从本会话整理，不得编造未发生的方案。
+
+## JSON（schemaVersion: 1）
+
+必填：`schemaVersion`、`writtenAt`、`title`、`description`、`project`、`requirement`、`proposals`、`finalSolution`、`score`；有 PR 时写 `pr`。
+
+```json
+{
+  "schemaVersion": 1,
+  "writtenAt": "2026-08-14T11:56:16+08:00",
+  "title": "列表操作区按钮裁切修复",
+  "description": "一段话：本次会话做了什么、结果如何",
+  "project": {
+    "name": "entry-selector",
+    "githubUrl": "https://github.com/kne-union/entry-selector",
+    "defaultBranch": "master"
+  },
+  "pr": {
+    "url": "https://github.com/kne-union/entry-selector/pull/12",
+    "number": 12,
+    "branch": "cursor/fix-ops-clip",
+    "title": "fix: 操作区按钮裁切"
+  },
+  "requirement": {
+    "summary": "一句话需求",
+    "detail": "用户原话",
+    "acceptanceNotes": "验收原话"
+  },
+  "proposals": [
+    {
+      "id": 1,
+      "proposedAt": "2026-08-14T11:00:00+08:00",
+      "title": "方案标题",
+      "description": "要点",
+      "status": "accepted"
+    }
+  ],
+  "finalSolution": {
+    "proposalId": 1,
+    "summary": "最终做法",
+    "keyChanges": ["关键改动"],
+    "versionBump": "0.2.11 → 0.2.12",
+    "codeSnippets": []
+  },
+  "score": {
+    "overall": 8,
+    "scale": { "min": 1, "max": 10 },
+    "dimensions": {
+      "requirementFit": 8,
+      "implementationQuality": 8,
+      "processCompliance": 8,
+      "userSatisfaction": 7
+    },
+    "rationale": "打分说明",
+    "userFeedbackSignals": ["通过"]
+  }
+}
+```
+
+### 字段要点
+
+- `proposals[].status`：`proposed` | `rejected` | `accepted` | `superseded`
+- `codeSnippets`：通常 2–5 段、每段 ≤40 行；纯规则/文档可为 `[]`
+- 打分约定与原先会话总结一致
+
+## 写完后输出信号
+
+落盘成功后，在回复中**单独输出**（`worklog_path` 为相对子路径）：
+
+```text
+WORKLOG_WRITTEN
+project: <name>
+worklog_path: worklog/<project>/<timestamp>/<title>.json
+title: <title>
+```
+
+- 本规则到此结束；**不要**在本规则内写 experience
+- 可复用经验由 `experience-distill-write` 在收到 `WORKLOG_WRITTEN` 后执行
+
+## 禁止
+
+- 无 `DEVELOPMENT_COMPLETE` 且无用户明确要求时写入
+- 把绝对路径写入 JSON 或信号
+- 把日志文件写进业务仓库
+- 输出 `WORKLOG_WRITTEN` 的同时自行写 experience
+- **未本地落盘仅走服务端 upload**
+- **同步成功仍删除本地 worklog 文件**
