@@ -1,7 +1,7 @@
 ---
 name: development-workflow
 description: >-
-  规则（rule）：仅 kne-union：开发交付流程；结束后发出 DEVELOPMENT_COMPLETE 供 worklog 规则消费
+  规则（rule）：仅 kne-union：开发交付流程；开始前 git fetch 并检查当前分支是否落后主干（落后给提示）；结束后发出 DEVELOPMENT_COMPLETE 供 worklog 规则消费
   该规则源自 Cursor 规则库，属于用户固定约定，匹配到相关场景时必须遵循。
 ---
 
@@ -12,7 +12,8 @@ description: >-
 > 准备调用 StrReplace / Write 修改业务文件？**停下，先自问：**
 > 1. 是否已执行 `git status` 并处理了未提交改动（stash）？→ **否则先走步骤 1**
 > 2. 是否已从主干创建功能分支并切换过去？→ **否则先走步骤 1-2**
-> 3. 任务再小（哪怕一行）也不例外。跳过流程 = 违规。
+> 3. 是否已 `git fetch` 并检查当前分支相对主干是否落后、落后已给用户提示？→ **否则先走步骤 0**
+> 4. 任务再小（哪怕一行）也不例外。跳过流程 = 违规。
 
 ## 适用范围
 
@@ -32,8 +33,35 @@ description: >-
 - 经验提炼：`experience-distill-write`（消费 `WORKLOG_WRITTEN`）
 - `@kne` / remote 文档：`kne-document-search`
 
+---
 
 只要需要修改代码，一律按下列流程执行。不需要「开始需求」等触发词。
+
+## 0. 开始前：检查当前分支相对主干是否落后（kne-union：需 fetch）
+
+改代码前（在步骤 1 的 stash 之前）先同步远程并做一次「落后检查」。**只提示、不阻断**：
+
+1. `git fetch origin`（**本流程需要 fetch**，与业务规则相反；fetch 只更新远程引用、不动工作区，可与步骤 2 的 fetch 合并为一次，不要重复执行）
+2. 确定主干 `MAIN_BRANCH`：`origin/main` / `origin/master`，或仓库约定主干
+3. 记录 `ORIGINAL_BRANCH = $(git branch --show-current)`（步骤 1、7 会用到）
+4. 比较当前分支与主干：
+
+```bash
+git rev-list --left-right --count "${MAIN_BRANCH}...HEAD"
+# 输出 "<behind>\t<ahead>"：左 = 落后主干的提交数，右 = 领先主干的提交数
+```
+
+5. **落后时（左值 > 0）必须给予提示**，并带上主干最近提交，方便用户判断是否要先更新：
+
+```bash
+git log --oneline -5 "${MAIN_BRANCH}"
+```
+
+提示示例：`⚠️ 当前分支 <ORIGINAL_BRANCH> 相对 <MAIN_BRANCH> 落后 N 个提交（主干近期有更新：…）。建议先确认是否要把主干合入/变基后再开发，否则可能基于旧代码。是否继续？`
+
+6. **只提示、不擅自处理**：不要自行 `merge` / `rebase` / `reset` 主干到当前分支，也不要因落后就终止流程；用户确认继续则按步骤 1 往下走。功能分支仍从**最新主干**创建（步骤 2），不受当前分支落后影响。
+7. `git fetch` 失败（离线 / 权限）：说明原因并提示用户，改用本地已有的 `origin/{主干}` 引用继续比较，并在提示中注明「未同步远程，结果基于本地引用」；**不要**因此跳过落后检查。
+8. 不落后（左值 = 0）：无需提示，直接进入步骤 1。
 
 ## 1. 检查工作区（有未提交则 stash）
 - 改代码前执行 `git status`（及必要的 `git diff`）
@@ -127,3 +155,5 @@ acceptance: <用户验收原话摘要>
 - 功能/修复 PR 不带 version bump
 - PR 未成功却输出 `DEVELOPMENT_COMPLETE`
 - 输出信号的同时自行写 worklog / experience
+- 开始前未 `git fetch` 就做落后检查、或落后时未给用户提示（步骤 0）
+- 落后检查时擅自把主干 merge / rebase 进当前分支，或因落后直接终止流程
