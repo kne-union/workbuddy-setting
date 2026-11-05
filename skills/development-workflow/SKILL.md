@@ -67,7 +67,7 @@ git log --oneline -5 "${MAIN_BRANCH}"
 - 改代码前执行 `git status`（及必要的 `git diff`）
 - 记录 `ORIGINAL_BRANCH`（当前分支）与 `STASHED=false`
 - 若存在未提交改动（已暂存 / 未暂存 / 未跟踪且未被 ignore）：
-  1. `git stash push -u -m "cursor-workflow: auto-stash before <简短说明>"`
+  1. `git stash push -u -m "workbuddy-workflow: auto-stash before <简短说明>"`
   2. 设 `STASHED=true`，汇报已 stash，**不要**因此终止流程
   3. stash 失败则停止并提示用户，不得丢改动、不得继续改代码
 - 工作区干净（或 stash 成功）后再进入下一步
@@ -76,7 +76,7 @@ git log --oneline -5 "${MAIN_BRANCH}"
 ## 2. 从主分支创建新分支
 - git fetch origin
 - 确定主分支（main / master，或仓库约定主干）
-- 从最新主干创建分支，命名：cursor/<简短英文描述>
+- 从最新主干创建分支，命名：workbuddy/<简短英文描述>
 - 若平台要求分支后缀，按要求追加；重名则追加 -2、-3…
 ## 3. 开发
 - 只改与需求相关的代码，保持最小改动

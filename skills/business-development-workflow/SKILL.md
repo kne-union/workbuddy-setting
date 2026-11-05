@@ -1,7 +1,7 @@
 ---
 name: business-development-workflow
 description: >-
-  规则（rule）：非 kne-union 业务项目：开始前不 fetch、用本地引用检查当前分支是否落后主干（落后给提示）；先拷贝到 ~/.cursor_workplace 开发，验收提交后拷回原仓同名分支并 merge 到个人基线分支，输出 DEVELOPMENT_COMPLETE
+  规则（rule）：非 kne-union 业务项目：开始前不 fetch、用本地引用检查当前分支是否落后主干（落后给提示）；先拷贝到 ~/.workbuddy_workplace 开发，验收提交后拷回原仓同名分支并 merge 到个人基线分支，输出 DEVELOPMENT_COMPLETE
   该规则源自 Cursor 规则库，属于用户固定约定，匹配到相关场景时必须遵循。
 ---
 
@@ -38,7 +38,7 @@ description: >-
 
 只要需要修改代码，一律按下列流程执行。不需要「开始需求」等触发词。
 
-**核心约定：** 业务代码只在 `~/.cursor_workplace/{项目名}/{时间戳}/` 副本中修改；原仓（SOURCE）仅在提交阶段接收同名分支并合回个人基线分支；**merge 并清理 workplace 后须回到 SOURCE_ROOT 继续**（见下方「禁止 fetch」——回到原仓正常，**不要**为此调用会 fetch 的工具）。
+**核心约定：** 业务代码只在 `~/.workbuddy_workplace/{项目名}/{时间戳}/` 副本中修改；原仓（SOURCE）仅在提交阶段接收同名分支并合回个人基线分支；**merge 并清理 workplace 后须回到 SOURCE_ROOT 继续**（见下方「禁止 fetch」——回到原仓正常，**不要**为此调用会 fetch 的工具）。
 
 ### 禁止 fetch（切回 SOURCE 正常，勿用 move_agent_to_root）
 
@@ -50,7 +50,7 @@ description: >-
 会话中记住：
 
 - `SOURCE_ROOT`：用户打开的原项目绝对路径
-- `WORKPLACE_ROOT`：本次副本绝对路径 `~/.cursor_workplace/<项目名>/<时间戳>/`
+- `WORKPLACE_ROOT`：本次副本绝对路径 `~/.workbuddy_workplace/<项目名>/<时间戳>/`
 - `PERSONAL_BRANCH`：个人基线分支名，由当前 git `user.name` 得到（见下方「个人基线分支」）
 - `ORIGINAL_BRANCH`：开始时 SOURCE 所在分支
 
@@ -67,7 +67,7 @@ SOURCE 与 WORKPLACE 是**两个目录**。原仓若有未提交改动，只在�
 
 1. `git status`；记下当前分支 `WRAP_BRANCH`（开工时即 `ORIGINAL_BRANCH`）
 2. 若有未提交（已暂存 / 未暂存 / 未跟踪且未被 ignore）：
-   - `git stash push -u -m "cursor-workflow: wrap-copy <拷出|拷回>"`
+   - `git stash push -u -m "workbuddy-workflow: wrap-copy <拷出|拷回>"`
    - 失败则停止，不得丢改动、不得继续复制
 3. 执行本次复制 / git 写入（rsync、checkout、`am`、merge）
 4. 若本次做了 stash：先 `git checkout {WRAP_BRANCH}`（已在则跳过），再 `git stash pop`
@@ -123,12 +123,12 @@ git -C "$SOURCE_ROOT" log --oneline -5 "${MAIN_BRANCH}"
 - 记录 `ORIGINAL_BRANCH`（当前分支）、`SOURCE_ROOT`、仓库名（`basename`，作 `{项目名}`）、`PERSONAL_BRANCH`
 - **不要**因有未提交改动而终止；有 WIP 时按「复制包装」在下一步拷出时处理
 
-## 2. 拷贝到 ~/.cursor_workplace
+## 2. 拷贝到 ~/.workbuddy_workplace
 
 按「复制包装」：**有 WIP 则先 stash，再复制，复制完立刻在 SOURCE 还原**。
 
 1. 时间戳：`YYYYMMDD-HHMMSS`（本地时区）
-2. 目标：`WORKPLACE_ROOT=$HOME/.cursor_workplace/<项目名>/<时间戳>/`
+2. 目标：`WORKPLACE_ROOT=$HOME/.workbuddy_workplace/<项目名>/<时间戳>/`
 3. 若 SOURCE 有未提交：`git stash push -u`（规则见「复制包装」）
 4. `mkdir -p` 后完整拷贝（**必须含 `.git`**），**不要复制 `node_modules`**，拷完后用 symlink 指向原仓：
 
@@ -175,7 +175,7 @@ done
   - 本地已有：以其为基线
   - 本地没有、但已有 `origin/{PERSONAL_BRANCH}` 引用：`git checkout -b {PERSONAL_BRANCH} origin/{PERSONAL_BRANCH}`
   - 本地与 `origin/{PERSONAL_BRANCH}` 都没有：从默认主干创建本地 `{PERSONAL_BRANCH}`
-- 从 **`{PERSONAL_BRANCH}`** 创建功能分支，命名：`cursor/<简短英文描述>`
+- 从 **`{PERSONAL_BRANCH}`** 创建功能分支，命名：`workbuddy/<简短英文描述>`
 - 若平台要求分支后缀，按要求追加；重名则追加 -2、-3…
 - **不要**从默认主干直接拉功能分支（除非正在创建缺失的 `{PERSONAL_BRANCH}` 本身）
 
@@ -268,7 +268,7 @@ rg -n "localhost:|127\\.0\\.0\\.1|file:|link:" --glob '**/preset.js' --glob '**/
 merge 进 `{PERSONAL_BRANCH}` 且 WIP 已还原后**必须**清理本次副本（不要把 workplace 留到下次会话）：
 
 1. 若副本内仍有 dev server 在跑：先说明端口/PID，**不要**自行 kill；等用户停掉后再删，或用户明确要求清端口后再 `rm -rf`
-2. `rm -rf "$WORKPLACE_ROOT"` 删除本次副本目录（仅删本次时间戳目录，不删 `~/.cursor_workplace/<项目名>/` 父目录或其它会话副本）
+2. `rm -rf "$WORKPLACE_ROOT"` 删除本次副本目录（仅删本次时间戳目录，不删 `~/.workbuddy_workplace/<项目名>/` 父目录或其它会话副本）
 3. **收尾后在 SOURCE_ROOT 继续**（后续读写、`git -C` 均指向 SOURCE_ROOT；**禁止** `move_agent_to_root` / `move_agent_to_cloned_root`）
 4. 汇报已清理的 `WORKPLACE_ROOT` 与 `SOURCE_ROOT`
 

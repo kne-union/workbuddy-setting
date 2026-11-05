@@ -76,7 +76,7 @@ description: >-
   "pr": {
     "url": "https://github.com/kne-union/entry-selector/pull/12",
     "number": 12,
-    "branch": "cursor/fix-ops-clip",
+    "branch": "workbuddy/fix-ops-clip",
     "title": "fix: 操作区按钮裁切"
   },
   "requirement": {

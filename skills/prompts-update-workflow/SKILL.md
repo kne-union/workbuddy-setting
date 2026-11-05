@@ -54,7 +54,7 @@ description: >-
 
 ### 4. 用户同意
 
-1. 在 **源包仓库**（如 `kne-union/prompts-frontend-libs`）按 `development-workflow`：stash（若有 WIP）→ 从 master 建分支 `cursor/...` → 将**与本地草稿相同**的改动写入源仓 `prompts/` 对应文件
+1. 在 **源包仓库**（如 `kne-union/prompts-frontend-libs`）按 `development-workflow`：stash（若有 WIP）→ 从 master 建分支 `workbuddy/...` → 将**与本地草稿相同**的改动写入源仓 `prompts/` 对应文件
 2. `package.json` **patch +1** 升版本 → commit → push → 开 PR → 合并（CI 发 npm）
 3. 汇报：PR 链接、新版本号；提示用户在业务项目执行 `npx @kne/npm-tools deployPrompts <type>` 刷新本地 `prompts/`（**不要**在业务仓 commit `prompts/`）
 
