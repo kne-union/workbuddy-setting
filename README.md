@@ -17,7 +17,7 @@
 
 | 技能 | 说明 |
 |------|------|
-| `business-development-workflow` | 非 kne-union 业务项目：**开始前不 fetch**，用本地引用检查当前分支是否落后主干并提示；拷贝到 `~/.cursor_workplace` 开发，验收后拷回归档，输出 `DEVELOPMENT_COMPLETE` |
+| `business-development-workflow` | 非 kne-union 业务项目：**开始前不 fetch**，用本地引用检查当前分支是否落后主干并提示；拷贝到 `~/.workbuddy_workplace` 开发，验收后拷回归档，输出 `DEVELOPMENT_COMPLETE` |
 | `development-workflow` | 仅 kne-union：开发交付流程，**开始前 `git fetch` 并检查当前分支是否落后主干并提示**；结束后发出 `DEVELOPMENT_COMPLETE` 供 worklog 规则消费 |
 | `experience-distill-write` | 收到 `WORKLOG_WRITTEN` 后提炼可复用经验，按 business/library/process 分层沉淀 |
 | `experience-similar-search` | 动手前先在本地经验库与 MCP「Prompts」npm 包内检索可复用经验 |
