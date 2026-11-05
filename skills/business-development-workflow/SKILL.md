@@ -1,7 +1,7 @@
 ---
 name: business-development-workflow
 description: >-
-  规则（rule）：非 kne-union 业务项目：先拷贝到 ~/.cursor_workplace 开发，验收提交后拷回原仓同名分支并 merge 到个人基线分支，输出 DEVELOPMENT_COMPLETE
+  规则（rule）：非 kne-union 业务项目：开始前不 fetch、用本地引用检查当前分支是否落后主干（落后给提示）；先拷贝到 ~/.cursor_workplace 开发，验收提交后拷回原仓同名分支并 merge 到个人基线分支，输出 DEVELOPMENT_COMPLETE
   该规则源自 Cursor 规则库，属于用户固定约定，匹配到相关场景时必须遵循。
 ---
 
@@ -12,7 +12,8 @@ description: >-
 > 准备调用 StrReplace / Write 修改业务文件？**停下，先自问：**
 > 1. 本次改动的**文件路径**是否在 `WORKPLACE_ROOT` 下？→ **否则禁止改文件**
 > 2. 是否已完成"拷贝到 workplace → 建分支"？→ **否则先走步骤 1-3**
-> 3. 任务再小（哪怕一行）也不例外。直接改 SOURCE = 违规。
+> 3. 是否已用**本地引用**检查当前分支相对主干是否落后、落后已给用户提示（**未 fetch**）？→ **否则先走步骤 0**
+> 4. 任务再小（哪怕一行）也不例外。直接改 SOURCE = 违规。
 
 ## 适用范围
 
@@ -33,6 +34,7 @@ description: >-
 - 工作日志：`worklog-write`（消费下方信号）
 - 经验提炼：`experience-distill-write`（消费 `WORKLOG_WRITTEN`）
 
+---
 
 只要需要修改代码，一律按下列流程执行。不需要「开始需求」等触发词。
 
@@ -85,6 +87,33 @@ SOURCE 与 WORKPLACE 是**两个目录**。原仓若有未提交改动，只在�
 4. 结果即为 `PERSONAL_BRANCH`；下文凡写 `{PERSONAL_BRANCH}` 均指该值，**不要**写死 `linzp`
 5. 若 `user.name` 为空：停止并提示用户配置，不要臆造分支名
 
+---
+
+## 0. 开始前：检查当前分支相对主干是否落后（业务：禁止 fetch）
+
+改代码前（在步骤 1 之前）做一次「落后检查」。**只提示、不阻断，全程不 fetch**（遵循上方「禁止 fetch」）：
+
+1. 在 **SOURCE_ROOT** 确定主干 `MAIN_BRANCH`：优先本地已有分支 `main` / `master`；没有则用本地已有的远程跟踪引用 `origin/main` / `origin/master`（**只用本地已有引用，不拉远程**）
+2. 本地完全没有主干引用：不比较，明确提示「本地无主干引用，按禁止 fetch 约定跳过落后检查」，然后继续步骤 1
+3. 记录 `ORIGINAL_BRANCH = $(git -C "$SOURCE_ROOT" branch --show-current)`（步骤 1、复制包装会用到）
+4. 比较（只看本地引用，不联网）：
+
+```bash
+git -C "$SOURCE_ROOT" rev-list --left-right --count "${MAIN_BRANCH}...HEAD"
+# 输出 "<behind>\t<ahead>"：左 = 落后主干的提交数，右 = 领先主干的提交数
+```
+
+5. **落后时（左值 > 0）必须给予提示**，并列出主干最近的本地提交：
+
+```bash
+git -C "$SOURCE_ROOT" log --oneline -5 "${MAIN_BRANCH}"
+```
+
+提示示例：`⚠️ 当前分支 <ORIGINAL_BRANCH> 相对本地 <MAIN_BRANCH> 落后 N 个提交。本流程按约定未 fetch，远程主干可能更新更多；建议自行确认是否需要先把主干更新到本地。是否继续？`
+
+6. **只提示、不擅自处理**：不自动 `merge` / `rebase` / `checkout` 主干，不因落后终止流程；用户确认继续则按步骤 1 往下走。功能分支从 `{PERSONAL_BRANCH}` 创建（步骤 3），与主干落后检查相互独立。
+7. 需要时可用同一命令把 `HEAD` 换成 `{PERSONAL_BRANCH}` 检查个人基线是否落后，**依旧不 fetch**；两项结果分开说清楚，不要混为一谈。
+8. 不落后（左值 = 0）：无需提示，直接进入步骤 1。
 
 ## 1. 检查原仓工作区
 
@@ -293,3 +322,6 @@ workplace: <WORKPLACE_ROOT>
 - 未经用户要求 push 远程或开 PR
 - 套用 kne-union 的 `development-workflow`（push/PR 到主干）替代本流程
 - 用副本目录覆盖 SOURCE 的 `.git`，或在 SOURCE 执行破坏性 git 命令清理历史
+- 为做主干落后检查而执行 `git fetch` / `git pull`、或调用会 fetch 的 MCP 工具（步骤 0 只准用本地已有引用）
+- 开始时未做落后检查、或落后时未给用户提示（步骤 0）
+- 落后检查时擅自 merge / rebase / 切换主干，或因落后直接终止流程
